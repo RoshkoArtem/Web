@@ -1,7 +1,22 @@
 {
   "lights": [
-    { "id": 1, "color": "#ff0000", "description": "Червоний", "clickcount": 0 },
-    { "id": 2, "color": "#ffff00", "description": "Жовтий", "clickcount": 0 },
-    { "id": 3, "color": "#00ff00", "description": "Зелений", "clickcount": 0 }
+    {
+      "id": 1,
+      "color": "#ff0000",
+      "description": "Червоний",
+      "clickcount": 1
+    },
+    {
+      "id": 2,
+      "color": "#ffff00",
+      "description": "Жовтий",
+      "clickcount": 1
+    },
+    {
+      "id": 3,
+      "color": "#00ff00",
+      "description": "Зелений",
+      "clickcount": 10
+    }
   ]
 }

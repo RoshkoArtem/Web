@@ -2,71 +2,225 @@ import { createContext, useState, useEffect } from 'react';
 
 export const TrafficLightsContext = createContext();
 
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwdlNK3A4BcRCG4HvUhpVN7gWpIGBtl8ONKTS2EjCvjyBVf11U0wYscowxB83rBAlwd/exec';
+const BASE_LIGHTS = [
+  { id: 1, color: '#ff0000', description: 'Червоний' },
+  { id: 2, color: '#ff8c00', description: 'Помаранчевий' },
+  { id: 3, color: '#00c853', description: 'Зелений' },
+];
+const COLOR_BY_ID = { 1: 'red', 2: 'yellow', 3: 'green' };
+
 export const TrafficLightsProvider = ({ children }) => {
-  const [lights, setLights] = useState([]);
-  const [activeAutoLightId, setActiveAutoLightId] = useState(1); // 1: Red, 2: Yellow, 3: Green
-  const [f1State, setF1State] = useState('stop'); // 'stop' | 'start'
+  const [lights, setLights] = useState(
+    BASE_LIGHTS.map((l) => ({ ...l, blinks: 3, duration: 0.15, brightness: 0.35, clickcount: 0 }))
+  );
+  const [trafficLightInstances, setTrafficLightInstances] = useState([]);
+  const [instanceClicks, setInstanceClicks] = useState({});
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Fetch data from json-server
-  useEffect(() => {
-    fetch('http://localhost:3000/lights')
-      .then(res => res.json())
-      .then(data => setLights(data))
-      .catch(err => console.error("json-server not running?", err));
-  }, []);
+  // Auto light
+  const [sequenceIndex, setSequenceIndex] = useState(0);
+  const [autoTimeLeft, setAutoTimeLeft] = useState(30);
 
-  // Sync F1 when Auto Light changes
-  useEffect(() => {
-    if (activeAutoLightId === 3) {
-      setF1State('stop');
-    }
-  }, [activeAutoLightId]);
+  // F1 light
+  const [f1Phase, setF1Phase] = useState('idle');
+  const [f1StateTimeLeft, setF1StateTimeLeft] = useState(10);
 
-  // F1 Auto-toggle every 10s
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setF1State(prev => {
-        if (activeAutoLightId === 3) return 'stop'; // Block toggle if green
-        return prev === 'stop' ? 'start' : 'stop';
-      });
-    }, 10000);
-    return () => clearInterval(timer);
-  }, [activeAutoLightId]);
+  const mapApiLightsToState = (apiLights) => {
+    const safeLights = Array.isArray(apiLights) ? apiLights : [];
 
-  const incrementClick = (id) => {
-    // Set as active
-    setActiveAutoLightId(id);
+    const nextInstances = safeLights.map((item) => ({
+      id: Number(item.id),
+      name: item.name || `Світлофор #${item.id}`,
+      orientation: item.orientation === 'horizontal' ? 'horizontal' : 'vertical',
+      activeColor: item.activeColor || 'red',
+    }));
 
-    // Update click count locally
-    const updatedLights = lights.map(light => 
-      light.id === id ? { ...light, clickcount: light.clickcount + 1 } : light
+    const nextInstanceClicks = {};
+    safeLights.forEach((item) => {
+      const id = Number(item.id);
+      nextInstanceClicks[`${id}_1`] = Number(item.redClicks || 0);
+      nextInstanceClicks[`${id}_2`] = Number(item.yellowClicks || 0);
+      nextInstanceClicks[`${id}_3`] = Number(item.greenClicks || 0);
+    });
+
+    const totalRed = safeLights.reduce((acc, item) => acc + Number(item.redClicks || 0), 0);
+    const totalYellow = safeLights.reduce((acc, item) => acc + Number(item.yellowClicks || 0), 0);
+    const totalGreen = safeLights.reduce((acc, item) => acc + Number(item.greenClicks || 0), 0);
+
+    setTrafficLightInstances(nextInstances);
+    setInstanceClicks(nextInstanceClicks);
+    setLights((prev) =>
+      prev.map((light) => {
+        if (light.id === 1) return { ...light, clickcount: totalRed };
+        if (light.id === 2) return { ...light, clickcount: totalYellow };
+        return { ...light, clickcount: totalGreen };
+      })
     );
-    setLights(updatedLights);
+  };
 
-    // Save to json-server
-    const lightToUpdate = updatedLights.find(l => l.id === id);
-    if (lightToUpdate) {
-      fetch(`http://localhost:3000/lights/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clickcount: lightToUpdate.clickcount })
-      }).catch(err => console.error("Failed to update json-server", err));
+  const fetchAllLights = async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getAllLights&t=${Date.now()}`);
+      const data = await res.json();
+      if (data?.status === 'ok') {
+        mapApiLightsToState(data.data);
+      }
+    } catch (err) {
+      console.error('Failed to load traffic lights from GAS', err);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const toggleF1State = () => {
-    if (activeAutoLightId === 3) return; // Prevent change
-    setF1State(prev => prev === 'stop' ? 'start' : 'stop');
+  // Fallback sequences if lights are empty
+  const autoSequence = lights.length >= 3
+    ? [lights[0].id, lights[1].id, lights[2].id, lights[1].id]
+    : [1, 2, 3, 2];
+
+  const activeAutoLightId = autoSequence[sequenceIndex];
+  const isAutoGreen = activeAutoLightId === (lights[2]?.id || 3);
+
+  // ── Auto light timer ──────────────────────────────────────────────────
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setAutoTimeLeft((prev) => {
+        if (prev <= 1) {
+          const nextIndex = (sequenceIndex + 1) % autoSequence.length;
+          setSequenceIndex(nextIndex);
+          return nextIndex === 1 || nextIndex === 3 ? 5 : 30;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [sequenceIndex, autoSequence.length]);
+
+  useEffect(() => {
+    fetchAllLights();
+  }, []);
+
+  // ── F1 State Machine ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (isAutoGreen) {
+      setF1Phase('idle');
+      setF1StateTimeLeft(10);
+    }
+  }, [isAutoGreen]);
+
+  useEffect(() => {
+    if (isAutoGreen) return;
+    let timer;
+
+    if (f1Phase === 'idle' || f1Phase === 'go' || f1Phase === 'yellow') {
+      timer = setInterval(() => {
+        setF1StateTimeLeft((prev) => {
+          if (prev <= 1) {
+            if (f1Phase === 'idle') setF1Phase('seq1');
+            else if (f1Phase === 'yellow') { setF1Phase('go'); return 10; }
+            else if (f1Phase === 'go') setF1Phase('idle');
+            return 10;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      timer = setInterval(() => {
+        setF1Phase((current) => {
+          switch (current) {
+            case 'seq1': return 'seq2';
+            case 'seq2': return 'seq3';
+            case 'seq3': return 'seq4';
+            case 'seq4': return 'seq5';
+            case 'seq5': setF1StateTimeLeft(10); return 'yellow';
+            default: return 'idle';
+          }
+        });
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [f1Phase, isAutoGreen]);
+
+  const startF1Sequence = () => {
+    if (isAutoGreen) return;
+    if (f1Phase === 'idle') setF1Phase('seq1');
+    else if (f1Phase === 'go') {
+      setF1Phase('idle');
+      setF1StateTimeLeft(10);
+    }
+  };
+
+  // ── Clicks CRUD ──────────────────────────────────────────────────────
+  const incrementClick = (instanceId, lightId) => {
+    const targetId = Number(instanceId);
+    const color = COLOR_BY_ID[Number(lightId)];
+    if (!targetId || !color) return;
+
+    setInstanceClicks((prev) => {
+      const key = `${targetId}_${lightId}`;
+      const newCount = (prev[key] || 0) + 1;
+      return { ...prev, [key]: newCount };
+    });
+
+    setLights((prev) =>
+      prev.map((light) =>
+        Number(light.id) === Number(lightId)
+          ? { ...light, clickcount: Number(light.clickcount || 0) + 1 }
+          : light
+      )
+    );
+
+    fetch(`${GOOGLE_SCRIPT_URL}?action=addClick&id=${targetId}&color=${color}`).catch(console.error);
+  };
+
+  const addLight = () => {};
+
+  const updateLight = (id, updates) => {
+    setLights((prev) => prev.map((light) => (light.id === id ? { ...light, ...updates } : light)));
+  };
+
+  const deleteLight = () => {};
+
+  const addTrafficLightInstance = async (orientation) => {
+    try {
+      await fetch(`${GOOGLE_SCRIPT_URL}?action=addLight&orientation=${orientation}`);
+      await fetchAllLights();
+    } catch (err) {
+      console.error('Failed to add traffic light', err);
+    }
+  };
+
+  const deleteTrafficLightInstance = async (id) => {
+    try {
+      await fetch(`${GOOGLE_SCRIPT_URL}?action=deleteLight&id=${id}`);
+      await fetchAllLights();
+    } catch (err) {
+      console.error('Failed to delete traffic light', err);
+    }
   };
 
   return (
-    <TrafficLightsContext.Provider value={{
-      lights,
-      activeAutoLightId,
-      incrementClick,
-      f1State,
-      toggleF1State
-    }}>
+    <TrafficLightsContext.Provider
+      value={{
+        lights,
+        trafficLightInstances,
+        activeAutoLightId,
+        isAutoGreen,
+        autoTimeLeft,
+        incrementClick,
+        f1Phase,
+        f1StateTimeLeft,
+        startF1Sequence,
+        addTrafficLightInstance,
+        deleteTrafficLightInstance,
+        addLight,
+        updateLight,
+        deleteLight,
+        isLoading,
+        instanceClicks,
+      }}
+    >
       {children}
     </TrafficLightsContext.Provider>
   );
