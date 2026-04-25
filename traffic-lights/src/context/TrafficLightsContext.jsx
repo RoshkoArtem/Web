@@ -2,7 +2,7 @@ import { createContext, useState, useEffect } from 'react';
 
 export const TrafficLightsContext = createContext();
 
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwdlNK3A4BcRCG4HvUhpVN7gWpIGBtl8ONKTS2EjCvjyBVf11U0wYscowxB83rBAlwd/exec';
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwWLfmm2dCbg5ZEVvIynkXvkN6pSxp7pkmWQd20e1k2MEWWcfqDfmtBNPyBqBwQe9lQXA/exec';
 const BASE_LIGHTS = [
   { id: 1, color: '#ff0000', description: 'Червоний' },
   { id: 2, color: '#ff8c00', description: 'Помаранчевий' },

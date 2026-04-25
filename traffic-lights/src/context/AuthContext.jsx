@@ -3,7 +3,7 @@ import { createContext, useEffect, useState } from 'react';
 export const AuthContext = createContext();
 
 // Заглушка, яку можна буде замінити на реальний URL Google Apps Script
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwdlNK3A4BcRCG4HvUhpVN7gWpIGBtl8ONKTS2EjCvjyBVf11U0wYscowxB83rBAlwd/exec';
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwWLfmm2dCbg5ZEVvIynkXvkN6pSxp7pkmWQd20e1k2MEWWcfqDfmtBNPyBqBwQe9lQXA/exec';
 
 export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(() => localStorage.getItem('tl_auth') === '1');
